@@ -47,3 +47,11 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+.DS_Store
+__pycache__/
+.env

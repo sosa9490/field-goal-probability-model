@@ -1,60 +1,59 @@
-# This function pulls, cleans, and enriches NFL field goal play-by-play data for a given range of seasons.
-# It keeps only tagged columns, filters for field goal attempts, parses weather strings, and fills in missing stadium surface info.
-# example usage: 
-#source("utilities/load_fg_data.R")
-#pbp_fg_data <- load_fg_data(2010, 2024)
+# Pull, clean, and adds variables to NFL field goal play-by-play data for a given season range
+
+# Filters for FG attempts, adds weather and surface info, and keeps only tagged variables
+
+# Example usage:
+# source("utilities/load_fg_data.R")
+# pbp_fg_data <- load_fg_data(2010, 2024)
 
 load_fg_data <- function(start_year, end_year) {
   
-  # Load required libraries
+  # Load necessary libraries
   library(tidyverse)
   library(nflreadr)
   library(nflfastR)
   library(nflplotR)
   library(stringr)
   
-  # Load helper functions for weather parsing and blank summaries
+  # Load helper functions for weather parsing and summarizing blanks
   source("utilities/helpers.R")
   
-  # Load file that contains tagged metadata for PBP columns
-  # This file was created manually to tag which columns we actually want to keep
-  pbp_column_tags <- read_csv("data/processed/field_descriptions_tagged_kicking.csv") %>%
+  # Load the manually tagged column list and keep only the ones marked for modeling
+  pbp_column_tags <- read_csv("data/field_descriptions_tagged_kicking.csv") %>%
     filter(Include == 1)
   
   selected_columns <- pbp_column_tags$Field
   
-  # Pull play-by-play data for the given seasons
-  # Only keep columns that were marked as Include = 1 in the metadata
+  # Pull PBP data for the selected seasons and keep only the selected columns
   pbp_all <- load_pbp(start_year:end_year) %>%
     select(all_of(selected_columns))
   
-  # Filter for field goal attempts only
-  # Also remove any leading/trailing spaces in the surface column
+  # Filter for just field goal attempts and trim any whitespace in surface column
   pbp_fg <- pbp_all %>%
     filter(play_type == "field_goal") %>%
     mutate(surface = str_trim(surface))
   
-  # Parse the weather string into structured columns (temp, humidity, wind, etc.)
-  # This helps us fill in missing weather-related values that we know we'll want later
+  # Parse the free-text weather string into structured columns (e.g., wind, temp, etc.)
+  # This helps us fill in missing weather-related values that we know we will want later
   weather_data <- parse_weather(pbp_fg$weather)
   
-  # Join parsed weather columns to the main field goal dataset
+  # Join parsed weather columns back onto the FG data
   pbp_fg_weather <- bind_cols(pbp_fg, weather_data)
   
-  # Load schedule data so we can reference surface type for each stadium and game
+  # Pull schedule data to get official surface info per game
   schedule_data <- load_schedules(start_year:end_year)
   
-  # Create surface reference table for domestic games that already have surface info
+  # Build surface reference table for domestic games with known surfaces
   nfl_stadium_surface <- schedule_data %>%
     filter(location != "Neutral", surface != "") %>%
     distinct(season, stadium_id, surface)
   
-  # Do the same for international games that already have surface info
+  # Do the same for international games with complete surface info
   intl_stadium_surface_complete_data <- schedule_data %>%
     filter(game_type == "REG", location == "Neutral", surface != "") %>%
     distinct(season, stadium_id, surface)
   
-  # For international games with missing surface info, we manually assign the correct surface
+  # Fill in missing international surface types manually based on known stadium info
   # This was based on looking up the stadium and year online
   intl_stadium_surface_missing_data <- schedule_data %>%
     filter(game_type == "REG", location == "Neutral", surface == "") %>%
@@ -68,11 +67,11 @@ load_fg_data <- function(start_year, end_year) {
       TRUE ~ NA_character_
     ))
   
-  # Combine international surface data (complete + missing that we just filled)
+  # Combine all international surface data (complete + filled)
   intl_stadium_surface <- bind_rows(intl_stadium_surface_complete_data, intl_stadium_surface_missing_data) %>%
     distinct(season, stadium_id, surface)
   
-  # Combine domestic and international surface records into one reference table
+  # Merge domestic and international surfaces into a master reference table
   # Remove any duplicate season/stadium combinations by keeping the first one
   stadium_surface_reference <- bind_rows(nfl_stadium_surface, intl_stadium_surface) %>%
     rename(surface_type = surface) %>%
@@ -80,14 +79,13 @@ load_fg_data <- function(start_year, end_year) {
     slice_head(n=1) %>%
     ungroup()
   
-  # Merge stadium surface type into the main field goal data
-  # If surface is missing in the original PBP data, use the one from our reference table
+  # Fill in any missing surface info using the reference table
   pbp_fg_final <- pbp_fg_weather %>%
     left_join(stadium_surface_reference, by = c("season", "stadium_id")) %>%
     mutate(surface_type = ifelse(is.na(surface) | surface == "", surface_type, surface)) %>%
-    select(-surface)  # drop original surface column
+    select(-surface)  
   
-  # Keep only columns we know we want for EDA, feature engineering, and modeling
+  # Final column selection — keep only what's useful for EDA, feature work, and modeling
   pbp_fg_final <- pbp_fg_final %>%
     select(
       play_id, game_id, season, season_type, start_time, posteam, posteam_type, game_date, qtr, game_seconds_remaining,
@@ -100,5 +98,6 @@ load_fg_data <- function(start_year, end_year) {
   return(pbp_fg_final)
 }
 
+# Example usage:
 #pbp_fg_data <- load_fg_data(2010, 2024)
-#write.csv(pbp_fg_data, "data/processed/pbp_fg_data.csv")
+#write.csv(pbp_fg_data, "data/pbp_fg_data.csv")

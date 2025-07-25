@@ -1,9 +1,9 @@
-# utilities/feature_engineering.R
-# Prepares field goal data for modeling by engineering features, handling weather, and contextualizing game situations
+# Prepares field goal data for modeling by engineering features, normalizing weather values, and flagging game context (e.g., indoor, high leverage).
+# Run this before training any models — gives you a clean, ready-to-use dataset
 
-prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv = TRUE) {
+prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv = FALSE) {
   
-  # Load libraries
+  # Load required libraries
   library(tidyverse)
   library(janitor)
   library(lubridate)
@@ -12,22 +12,21 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
   library(nflfastR)
   library(nflplotR)
   
-  # Load custom utilities
+  # Pull in custom helper functions
   source("utilities/load_fg_data.R")
   source("utilities/helpers.R")
-  
   # Avoid scientific notation in outputs
   options(scipen = 999)
   
-  # Load raw play-by-play data for selected seasons
+  # Pull cleaned field goal attempts from play-by-play data
   fg_data <- load_fg_data(season_start, season_end)
   
-  # Create binary outcome variable for whether field goal was made
+  # Create binary outcome variable for whether the field goal was made
   fg_df <- fg_data %>%
     mutate(fg_made = ifelse(field_goal_result == 'made', 1, 0)) %>%
     select(-field_goal_result)
   
-  # Create binary flags for indoor stadiums, turf, and high altitude locations
+  # Flag stadium conditions and altitude
   fg_df <- fg_df %>%
     mutate(
       Indoor = ifelse(roof %in% c('dome', 'closed'), 1, 0),
@@ -35,7 +34,7 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
       Altitude = ifelse(stadium_id %in% c("DEN00", "MEX00"), 1, 0)
     )
   
-  # Set default weather values for indoor games (ideal controlled environment)
+  # Assign default weather conditions for indoor games (climate-controlled)
   dome_df <- fg_df %>%
     filter(Indoor == 1) %>%
     mutate(
@@ -45,8 +44,9 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
       Precip = 0
     )
   
-  # Identify precipitation for outdoor games based on actual weather reports (not forecasts)
-  # Also fill missing parsed values with available or default values
+  # Parse real weather conditions for outdoor games 
+  # (only set Precip flag if rain/snow is actually reported — not just "chance of")
+  # Also backfill missing weather values using available or default values
   outdoor_df <- fg_df %>%
     filter(Indoor == 0) %>%
     mutate(
@@ -64,10 +64,10 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
       wind_speed_parsed = ifelse(is.na(wind_speed_parsed) | wind_speed_parsed == "", 0, wind_speed_parsed)
     )
   
-  # Combine indoor and outdoor datasets
+  # Merge indoor and outdoor data into one cleaned dataframe
   fg_df <- bind_rows(dome_df, outdoor_df)
   
-  # Convert start time to datetime and flag night games (kickoff 6PM or later)
+  # Parse kickoff time and flag games played at night (6 PM or later)
   fg_df <- fg_df %>%
     mutate(
       start_time_clean = str_replace(start_time, ",", ""),
@@ -76,7 +76,7 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
     ) %>%
     select(-start_time_clean, -start_datetime)
   
-  # Flag high-leverage kicks (close games late in 4th quarter or any OT kick)
+  # Flag high-leverage kicks (close games late in 4th or any OT)
   fg_df <- fg_df %>%
     mutate(
       high_leverage = case_when(
@@ -124,21 +124,19 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
       high_wind = ifelse(wind_bucket == "High", 1, 0)
     )
   
-  # in order to create more meaningful wind variables, we will create a windy day variable...models can struggle to pick up significance if there a lot 0s in categorical variables
+  # Create a simpler 'windy day' variable to help the model pick up broader trends
   fg_df <- fg_df %>%
     mutate(windy_day = ifelse(wind_speed_parsed >= 10, 1, 0))
   
-  # create interaction variables
+  # Create interaction variables that may help the model learn weather-distance effects
   fg_df <- fg_df %>%
     mutate(
       wind_speed_x_kick_distance = wind_speed_parsed * kick_distance,
       cold_x_wind = cold * windy_day)
   
-  # Save to CSV if requested
+  # Save cleaned data to CSV if requested
   if (save_csv) {
-    write.csv(fg_df, "data/processed/fg_data_cleaned.csv", row.names = FALSE)
+    write.csv(fg_df, "data/fg_data_cleaned.csv", row.names = FALSE)
   }
-  
-  # Return cleaned dataset
   return(fg_df)
 }

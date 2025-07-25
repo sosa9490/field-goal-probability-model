@@ -1,11 +1,12 @@
-# Helper Functions for Data Cleaning
+# Helper functions to clean and evaluate field goal play-by-play data
+# Includes tools for summarizing missing data, parsing weather strings,
+# evaluating model performance, and tuning decision thresholds.
 
 library(tidyverse)
 
-# --------------------------------------
 # summarize_blanks()
-# Returns a summary of NA or blank string values per column
-# --------------------------------------
+# Quick way to see how many blanks or NAs are in each column of a dataset
+# Especially useful after pulling messy data like PBP or weather strings.
 summarize_blanks <- function(df) {
   data.frame(
     column = names(df),
@@ -24,11 +25,10 @@ summarize_blanks <- function(df) {
     arrange(desc(percent_missing))
 }
 
-# --------------------------------------
 # parse_weather()
-# Parses unstructured weather strings into usable numeric/text columns
-# Handles common edge cases like missing wind speed or direction
-# --------------------------------------
+# Turns the messy 'weather' string into structured columns like temp, humidity,
+# wind direction, and wind speed. Helps normalize inconsistently formatted text.
+# Use for filling in missing weather data
 parse_weather <- function(weather_str) {
   weather_str <- ifelse(is.na(weather_str), "", weather_str)
   
@@ -41,13 +41,12 @@ parse_weather <- function(weather_str) {
       # Extract wind phrase (e.g., "Wind: from NW 11 mph")
       wind_phrase = str_extract(raw, "Wind: [^,]+"),
       
-      # Extract wind direction, removing optional "from"/"From" prefix
+      # Extract wind direction, removing "from"/"From" prefix that sometimes appears
       wind_direction_parsed = case_when(
         str_detect(wind_phrase, "Wind: (N/A|mph|\\d+ mph)") ~ NA_character_,
         TRUE ~ str_extract(wind_phrase, "(?<=Wind: )([Ff]rom )?[A-Za-z]+") %>%
-          str_remove("(?i)from ")  # (?i) = case-insensitive match
+          str_remove("(?i)from ")  
       ),
-      
       # Extract wind speed as number before 'mph'
       wind_speed_parsed = case_when(
         str_detect(wind_phrase, "mph") ~ str_extract(wind_phrase, "\\d+") %>% as.numeric(),
@@ -57,17 +56,18 @@ parse_weather <- function(weather_str) {
     select(-raw, -wind_phrase)
 }
 
+# evaluate_model()
+# Prints performance metrics for a classification model, given probabilities and true labels
+# Includes confusion matrix, AUC, Brier Score, and Log Loss.
+# Used to compare different models or thresholds
 evaluate_model <- function(model, probs, truth, name, threshold = 0.5) {
-  # Convert predicted probabilities to class labels based on threshold
+  # Convert probabilities to predicted labels
   preds <- ifelse(probs > threshold, "yes", "no") %>% factor(levels = c("no", "yes"))
-  
-  # Convert truth to numeric 0/1 vector
+  # Convert truth labels to numeric 0/1 for metrics like Brier and log loss
   y_true <- ifelse(truth == "yes", 1, 0)
-  
-  # Ensure predicted probabilities are within valid bounds
+  # Bound the probabilities so we’re not feeding log loss a 0 or 1
   safe_probs <- pmin(pmax(probs, 1e-15), 1 - 1e-15)
-  
-  # Print evaluation metrics
+  # Print all evaluation metrics
   cat("\n----", name, "(Threshold =", threshold, ") ----\n")
   print(confusionMatrix(preds, truth, positive = "yes"))
   cat("AUC:", pROC::auc(pROC::roc(response = truth, predictor = probs)), "\n")
@@ -75,6 +75,9 @@ evaluate_model <- function(model, probs, truth, name, threshold = 0.5) {
   cat("Log Loss:", Metrics::logLoss(truth=="yes", probs), "\n")
 }
 
+# tune_thresholds()
+# Evaluates model performance across a range of classification thresholds.
+# Helps find the sweet spot between sensitivity and specificity.
 tune_thresholds <- function(pred_probs, true_labels) {
   thresholds <- seq(0.1, 0.9, by = 0.05)
   results <- data.frame()

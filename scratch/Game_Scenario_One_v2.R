@@ -65,7 +65,7 @@ go_ep_filtered <- go_ep_table %>%
   filter(n_total >= 10)
 
 # Predict Field Goal EPs under KC winter conditions
-# Load processed FG data and extract KC-specific game conditions in December/January
+# extract KC-specific game conditions in December/January
 fg_data <- prepare_fg_features(season_start = 2022, season_end = 2024)
 kc_winter_games <- fg_data %>%
   filter(stadium_id == "KAN00") %>%

@@ -9,30 +9,30 @@ library(gtExtras)
 source("utilities/load_fg_data.R")
 source("utilities/feature_engineering.R")
 
-# Load the trained logistic regression model and Platt scaling calibration model
+# Load trained models
 log_model <- readRDS("models/log_model_smote_final.rds")
 platt_model <- readRDS("models/platt_scaling_model.rds")
 
-# Prepare 2024 kick data and select relevant features for prediction
+# Prepare 2024 kick data with relevant features for prediction
 pred_data_2024 <- prepare_fg_features(season_start = 2024, season_end = 2024) %>%
   select(kicker_player_id, fg_made, kick_distance, Turf:away_game, cold:humid_game, windy_day,
          wind_speed_x_kick_distance, cold_x_wind) %>%
   drop_na()
 
-# Predict raw probabilities from the logistic regression model
+# Predict raw probabilities of FG success using the logistic regression model
 raw_probs <- predict(log_model, newdata = pred_data_2024, type = "prob")[, "yes"]
 
-# Apply Platt scaling to calibrate predicted probabilities
+# Calibrate probabilities using calibration model
 calibrated_probs <- predict(
   platt_model,
   newdata = data.frame(raw_probs_val = raw_probs),
   type = "response"
 )
 
-# Convert calibrated probabilities into binary class predictions using a 0.50 threshold
+# Generate predictions using a 0.50 probability threshold
 class_preds <- ifelse(calibrated_probs > 0.50, "yes", "no")
 
-# Combine predictions with original data and calculate points added + kick range bucket
+# Add predictions and calculated metrics to dataset
 pred_results_24 <- pred_data_2024 %>%
   mutate(
     prob_raw = raw_probs,
@@ -41,27 +41,20 @@ pred_results_24 <- pred_data_2024 %>%
     points_added = 3 * fg_made - 3 * prob_calibrated,
     kick_range = case_when(
       kick_distance < 30 ~ "zero_29",
-      kick_distance >= 30 & kick_distance < 40 ~ "thirty_39",
-      kick_distance >= 40 & kick_distance < 50 ~ "fourty_49",
-      kick_distance >= 50 ~ "fifty_plus"
+      kick_distance < 40 ~ "thirty_39",
+      kick_distance < 50 ~ "fourty_49",
+      TRUE ~ "fifty_plus"
     )
   ) %>%
   select(kicker_player_id, fg_made, kick_distance, kick_range, points_added)
 
-# Generate overall stats for each kicker:
-# - Total makes, attempts, FG%
-# - Points added per attempt
-# - Z-score based rating (min 10 attempts)
+# overall stats for kickers
 overall_kicker_stats <- pred_results_24 %>%
   group_by(kicker_player_id) %>%
   summarise(
     longest_fg = {
       made_kicks <- kick_distance[fg_made == 1]
-      if (length(made_kicks) > 0) {
-        max(made_kicks, na.rm = TRUE)
-      } else {
-        NA_real_
-      }
+      if (length(made_kicks) > 0) max(made_kicks, na.rm = TRUE) else NA_real_
     },
     fg_m = sum(fg_made),
     fg_attempts = n(),
@@ -85,10 +78,7 @@ overall_kicker_stats <- pred_results_24 %>%
   ) %>%
   select(kicker_player_id, M_A, fg_pct, pts_added_per_attempt, rating, longest_fg)
 
-# Summarize each kicker's performance by distance range:
-# - Total makes and attempts
-# - FG%
-# - Points added per attempt
+# kicker performance by kick range
 distance_kicker_summary <- pred_results_24 %>%
   group_by(kicker_player_id, kick_range) %>%
   summarise(
@@ -99,8 +89,7 @@ distance_kicker_summary <- pred_results_24 %>%
     .groups = "drop"
   )
 
-# Compute mean and standard deviation of points added per attempt for each distance range
-# Only applied to 40+ yard ranges; short-range buckets use absolute FG% thresholds instead
+# Compute reference z-scores for 40+ yard ranges
 z_score_ref <- distance_kicker_summary %>%
   filter(!kick_range %in% c("zero_29", "thirty_39"), fg_attempts >= 1) %>%
   group_by(kick_range) %>%
@@ -110,17 +99,11 @@ z_score_ref <- distance_kicker_summary %>%
     .groups = "drop"
   )
 
-# Assign distance-based ratings to each kicker-range:
-# - 0–29 and 30–39 yard ranges use FG% thresholds:
-#   • 0–29: thresholds like ≥95% for Excellent due to near-automatic make rate
-#   • 30–39: thresholds (93/88/83/78) based on historical NFL averages (league avg ≈ 89–91%)
-# - 40+ ranges use z-scores with softened thresholds (0.75, 0.25, etc.)
-# - Only kickers with ≥1 attempt in a range are rated; others are NA
+# Assign ratings by kick range using FG% (short kicks 0-39) or z-scores (kicks of 40+ yards)
 distance_kicker_stats <- distance_kicker_summary %>%
   left_join(z_score_ref, by = "kick_range") %>%
   mutate(
     z_score = (pts_added_per_attempt - mean_pts) / sd_pts,
-    
     rating = case_when(
       kick_range == "zero_29" & fg_attempts >= 1 ~ case_when(
         fg_pct >= 95 ~ "Excellent",
@@ -145,14 +128,11 @@ distance_kicker_stats <- distance_kicker_summary %>%
       ),
       TRUE ~ NA_character_
     ),
-    
     M_A = paste0(fg_m, "/", fg_attempts)
   ) %>%
   select(kicker_player_id, kick_range, M_A, fg_pct, pts_added_per_attempt, rating)
 
-# Pivot to wide format:
-# Each kick_range becomes its own group of columns:
-# - M_A, fg_pct, points added per attempt, and rating
+# Convert distance stats into wide format
 distance_kicker_stats_wide <- distance_kicker_stats %>%
   pivot_wider(
     names_from = kick_range,
@@ -160,20 +140,16 @@ distance_kicker_stats_wide <- distance_kicker_stats %>%
     names_glue = "{kick_range}_{.value}"
   )
 
-# Combine overall and range-based kicker stats into final output:
-# - Includes overall rating
-# - Orders columns by kick range for clarity
+# Combine overall and distance stats into one final table
 kicker_stats_final <- overall_kicker_stats %>%
   left_join(distance_kicker_stats_wide, by = "kicker_player_id") %>%
   arrange(desc(pts_added_per_attempt)) %>%
   select(kicker_player_id:rating, 
          starts_with("zero_29"), starts_with("thirty_39"), starts_with("fourty_49"), starts_with("fifty_plus"), longest_fg)
 
-
-# get some additional data for each kicker: longest fields, blocked, team played for
+# Load 2024 play-by-play data and summarize FG blocks by kicker and team
 pbp_data_2024 <- nflfastR::load_pbp(2024)
 
-#filter for field goals / calculated longest made FG and blocked kicks
 pbp_fg_data_2024 <- pbp_data_2024 %>%
   filter(field_goal_attempt == 1) %>%
   group_by(kicker_player_id, posteam) %>%
@@ -182,16 +158,14 @@ pbp_fg_data_2024 <- pbp_data_2024 %>%
     .groups = "drop"
   )
 
+# Get kicker team history (up to 5 teams) and total FG blocks
 kicker_team_blk_summary <- pbp_fg_data_2024 %>%
   group_by(kicker_player_id, posteam) %>%
   summarise(blocked_fg = sum(blocked_fg), .groups = "drop") %>%
   group_by(kicker_player_id) %>%
   mutate(team_index = paste0("team_", row_number())) %>%
-  filter(row_number() <= 5) %>%  # Keep only first 5 teams
-  pivot_wider(
-    names_from = team_index,
-    values_from = posteam
-  ) %>%
+  filter(row_number() <= 5) %>%
+  pivot_wider(names_from = team_index, values_from = posteam) %>%
   summarise(
     kicker_player_id = first(kicker_player_id),
     total_blocks = sum(blocked_fg),
@@ -199,19 +173,18 @@ kicker_team_blk_summary <- pbp_fg_data_2024 %>%
     .groups = "drop"
   )
 
-# get biographical data for each kicker
+# Load roster data and calculate kicker ages
 roster_data <- load_rosters(2024) %>%
   filter(position == "K") %>%
   select(gsis_id, full_name, birth_date, headshot_url) %>%
-  mutate(age= round(as.numeric(difftime(Sys.Date(), as.Date(birth_date), units = "days") / 365.25), 1)) %>%
+  mutate(age = round(as.numeric(difftime(Sys.Date(), as.Date(birth_date), units = "days") / 365.25), 1)) %>%
   select(-birth_date)
 
-
-# get team data and logo url
+# Load team logos
 team_data <- load_teams(current = TRUE) %>%
   select(team_abbr, team_logo_espn)
 
-# merge all kicker bio data for 2024 season
+# Merge kicker bio data, team logos, and block info
 kicker_bio_data <- roster_data %>%
   left_join(kicker_team_blk_summary, by = c("gsis_id" = "kicker_player_id")) %>%
   left_join(team_data, by = c("team_1" = "team_abbr")) %>%
@@ -224,16 +197,15 @@ kicker_bio_data <- roster_data %>%
   ) %>%
   select(gsis_id, headshot_url, full_name, age, team_1_logo, team_2_logo, team_3_logo, total_blocks)
 
-# merge with kicker stats
+# Merge all data into final kicker table
 kicker_table <- kicker_bio_data %>%
   left_join(kicker_stats_final, by = c("gsis_id" = "kicker_player_id")) %>%
   select(gsis_id:fg_pct, longest_fg, total_blocks, pts_added_per_attempt:last_col()) %>%
   filter(!is.na(M_A)) %>%
   select(-gsis_id) %>%
   arrange(desc(pts_added_per_attempt)) %>%
-  mutate(Rk = rank(-pts_added_per_attempt, ties.method = "min"))%>% select(Rk, headshot_url, full_name, team_1_logo:team_3_logo, age, M_A:fg_pct,longest_fg, total_blocks, pts_added_per_attempt:last_col())
-
-
+  mutate(Rk = rank(-pts_added_per_attempt, ties.method = "min")) %>%
+  select(Rk, headshot_url, full_name, team_1_logo:team_3_logo, age, M_A:fg_pct, longest_fg, total_blocks, pts_added_per_attempt:last_col())
 
 # BUILD OUTPUT
 
@@ -246,7 +218,7 @@ rating_colors <- list(
   "Poor" = "#F8B8B8"           # Light red
 )
 
-# Split your kicker_table into two parts...won't fit on one page
+# Split your kicker_table into three parts...won't fit on one page
 table_page_1 <- kicker_table[1:15, ]
 table_page_2 <- kicker_table[16:30, ]
 table_page_3 <- kicker_table[31:nrow(kicker_table), ]
@@ -374,7 +346,7 @@ build_gt_table <- function(data, page_number = 1, total_pages = 2) {
       source_note = md(paste0("**Page ", page_number, " of ", total_pages, "**"))
     )
   
-# Apply conditional rating formatting
+# Apply conditional formatting for ratings
   rating_columns <- c("rating", "zero_29_rating", "thirty_39_rating", "fourty_49_rating", "fifty_plus_rating")
   for (col in rating_columns) {
     for (label in names(rating_colors)) {
@@ -395,7 +367,7 @@ build_gt_table <- function(data, page_number = 1, total_pages = 2) {
   return(gt_table)
 }
 
-# Build both pages
+# Build pages
 gt_page_1 <- build_gt_table(table_page_1, page_number = 1, total_pages = 3)
 gt_page_2 <- build_gt_table(table_page_2, page_number = 2, total_pages = 3)
 gt_page_3 <- build_gt_table(table_page_3, page_number = 3, total_pages = 3)

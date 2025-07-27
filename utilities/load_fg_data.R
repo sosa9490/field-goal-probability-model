@@ -34,7 +34,7 @@ load_fg_data <- function(start_year, end_year) {
     mutate(surface = str_trim(surface))
   
   # Parse the free-text weather string into structured columns (e.g., wind, temp, etc.)
-  # This helps us fill in missing weather-related values that we know we will want later
+  # This help fill in missing weather-related values that we know we will want later
   weather_data <- parse_weather(pbp_fg$weather)
   
   # Join parsed weather columns back onto the FG data
@@ -62,8 +62,8 @@ load_fg_data <- function(start_year, end_year) {
       stadium_id == "MEX00" ~ "grass",   # Estadio Azteca
       stadium_id == "SAO00" ~ "grass",   # Corinthians Arena
       stadium_id == "GER00" ~ "grass",   # Allianz Arena
-      stadium_id == "LON00" ~ "turf",    # Tottenham Hotspur
-      stadium_id == "LON02" ~ "turf",    # Wembley
+      stadium_id == "LON00" ~ "turf",    # London 
+      stadium_id == "LON02" ~ "turf",    # London
       TRUE ~ NA_character_
     ))
   

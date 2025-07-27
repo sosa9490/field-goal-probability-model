@@ -42,7 +42,7 @@ inner_split <- initial_split(train_val_data, prop = 0.8, strata = fg_made)
 train_data <- training(inner_split)
 val_data <- testing(inner_split)
 
-# Prepare training data for caret model training
+# Prepare training data for model training
 train_x <- train_data %>% select(-fg_made, -play_id, -game_id, -posteam, -season)
 train_y <- train_data$fg_made
 
@@ -68,7 +68,7 @@ log_model_smote <- train(
 # Save trained model for later scoring
 saveRDS(log_model_smote, "models/log_model_smote_final.rds")
 
-# Calibration: Platt Scaling using validation set
+# Calibration- Platt Scaling using validation set
 val_x <- val_data %>% select(-fg_made, -play_id, -game_id, -posteam, -season)
 val_y <- val_data$fg_made
 
@@ -79,8 +79,7 @@ raw_probs_val <- predict(log_model_smote, newdata = val_x, type = "prob")[, "yes
 platt_model <- glm(val_y ~ raw_probs_val, family = "binomial")
 saveRDS(platt_model, "models/platt_scaling_model.rds")
 
-# Optional: Evaluate model on held-out test set (currently commented out)
-# Uncomment if you want to validate performance and create outputs
+# Evaluate model on held-out test set (currently commented out)
 
 # test_x <- test_data %>% select(-fg_made, -play_id, -game_id, -posteam, -season)
 # test_y <- test_data$fg_made

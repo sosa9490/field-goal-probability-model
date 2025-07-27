@@ -218,7 +218,7 @@ rating_colors <- list(
   "Poor" = "#F8B8B8"           # Light red
 )
 
-# Split your kicker_table into three parts...won't fit on one page
+# Split kicker_table into three parts...won't fit on one page
 table_page_1 <- kicker_table[1:15, ]
 table_page_2 <- kicker_table[16:30, ]
 table_page_3 <- kicker_table[31:nrow(kicker_table), ]

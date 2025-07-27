@@ -6,7 +6,6 @@ source("utilities/feature_engineering.R")
 
 
 # Identify replacement-level kickers based on NFL pbp data
-
 # Load play-by-play data and filter for field goal attempts
 fg_data_pbp <- load_pbp(2013:2024) %>%
   filter(play_type == "field_goal")

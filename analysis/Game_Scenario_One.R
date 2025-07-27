@@ -7,7 +7,7 @@ library(nflreadr)
 source("utilities/feature_engineering.R")
 source("utilities/load_fg_data.R")
 
-# Load trained models: SMOTE logistic regression and Platt scaling calibration
+# Load trained models
 log_model <- readRDS("models/log_model_smote_final.rds")
 platt_model <- readRDS("models/platt_scaling_model.rds")
 
@@ -137,7 +137,7 @@ fg_ep_table <- kc_fg_predictions %>%
 
 # Compare Go vs Kick
 
-# Join FG_EP and Go_EP into a single long-format table
+# Join FG_EP and Go_EP into a single table
 ep_compare <- fg_ep_table %>%
   inner_join(go_ep_filtered, by = "yardline_100") %>%
   pivot_longer(cols = c(FG_EP, Go_EP), names_to = "Decision", values_to = "EP") %>%

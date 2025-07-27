@@ -1,5 +1,5 @@
 # Prepares field goal data for modeling by engineering features, normalizing weather values, and flagging game context (e.g., indoor, high leverage).
-# Run this before training any models — gives you a clean, ready-to-use dataset
+# Run this before training any models — gives a clean, ready-to-use dataset
 
 prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv = FALSE) {
   
@@ -21,7 +21,7 @@ prepare_fg_features <- function(season_start = 2013, season_end = 2024, save_csv
   # Pull cleaned field goal attempts from play-by-play data
   fg_data <- load_fg_data(season_start, season_end)
   
-  # Create binary outcome variable for whether the field goal was made
+  # Create outcome variable for whether the field goal was made
   fg_df <- fg_data %>%
     mutate(fg_made = ifelse(field_goal_result == 'made', 1, 0)) %>%
     select(-field_goal_result)
